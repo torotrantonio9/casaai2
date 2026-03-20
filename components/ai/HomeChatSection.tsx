@@ -5,12 +5,46 @@ import ChatOnboarding from './ChatOnboarding'
 import ChatWidget from './ChatWidget'
 import type { WizardContext } from '@/types/chat'
 
+function buildWelcomeMessage(ctx: WizardContext): string {
+  const parts: string[] = []
+  if (ctx.intent === 'sale') parts.push('acquisto')
+  if (ctx.intent === 'rent') parts.push('affitto')
+  if (ctx.budget_max) parts.push(`budget massimo €${ctx.budget_max.toLocaleString('it-IT')}${ctx.intent === 'rent' ? '/mese' : ''}`)
+  if (ctx.location_label) parts.push(`zona ${ctx.location_label}`)
+  if (ctx.rooms_needed) parts.push(`${ctx.rooms_needed} locali`)
+  if (ctx.must_have?.includes('Ascensore')) parts.push('con ascensore')
+  if (ctx.must_have?.includes('Posto auto')) parts.push('con posto auto')
+  if (ctx.must_have?.includes('Giardino')) parts.push('con giardino')
+  if (ctx.must_have?.includes('Terrazzo')) parts.push('con terrazzo')
+
+  return parts.length > 0
+    ? `Cerca immobili per ${parts.join(', ')}`
+    : 'Mostrami le migliori proposte disponibili'
+}
+
 export default function HomeChatSection() {
-  const [phase, setPhase] = useState<'wizard' | 'chat'>('wizard')
+  const [showWizard, setShowWizard] = useState(true)
   const [contextId, setContextId] = useState<string | null>(null)
-  const [welcomeMessage, setWelcomeMessage] = useState('')
+  const [autoMessage, setAutoMessage] = useState('')
+  const [welcomeText, setWelcomeText] = useState('')
 
   const handleWizardComplete = async (context: WizardContext) => {
+    console.log('[HomeChatSection] wizard complete:', JSON.stringify(context).slice(0, 200))
+
+    // Build display text for welcome bubble
+    const typeLabel = context.intent === 'sale' ? 'acquisto' : 'affitto'
+    const budgetFormatted = context.budget_max.toLocaleString('it-IT')
+    const budgetSuffix = context.intent === 'rent' ? '/mese' : ''
+    const locationPart = context.location_label ? ` a ${context.location_label}` : ''
+    const roomsPart = context.rooms_needed === 1 ? 'un monolocale' : `un ${context.rooms_needed} locali`
+
+    setWelcomeText(
+      `Perfetto! Cerco ${roomsPart} in ${typeLabel}${locationPart} con budget massimo €${budgetFormatted}${budgetSuffix}. ` +
+      `${context.must_have.length > 0 ? `Caratteristiche richieste: ${context.must_have.join(', ')}. ` : ''}` +
+      `Sto cercando gli annunci migliori per te...`
+    )
+
+    // Save context to API
     try {
       const sessionId = `session-${Date.now()}-${Math.random().toString(36).slice(2)}`
 
@@ -33,44 +67,37 @@ export default function HomeChatSection() {
         }),
       })
 
-      if (!response.ok) throw new Error('Errore salvataggio contesto')
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
 
       const data = await response.json()
+      console.log('[HomeChatSection] context saved, id:', data.context_id)
       setContextId(data.context_id)
-
-      // Build welcome message
-      const typeLabel = context.intent === 'sale' ? 'acquisto' : 'affitto'
-      const budgetFormatted = context.budget_max.toLocaleString('it-IT')
-      const budgetSuffix = context.intent === 'rent' ? '/mese' : ''
-      const locationPart = context.location_label ? ` a ${context.location_label}` : ''
-      const roomsPart = context.rooms_needed === 1 ? 'un monolocale' : `un ${context.rooms_needed} locali`
-
-      setWelcomeMessage(
-        `Perfetto! Cerco ${roomsPart} in ${typeLabel}${locationPart} con budget massimo €${budgetFormatted}${budgetSuffix}. ` +
-        `${context.must_have.length > 0 ? `Caratteristiche richieste: ${context.must_have.join(', ')}. ` : ''}` +
-        `Sto cercando gli annunci migliori per te...`
-      )
-
-      setPhase('chat')
     } catch (error: unknown) {
-      console.error('Error saving context:', error)
-      // Go to chat anyway without context
-      setPhase('chat')
+      console.error('[HomeChatSection] Context save failed:', error)
+      // Continue without context — chat will still work
     }
+
+    // Hide wizard, show chat
+    setShowWizard(false)
+
+    // Auto-trigger search after chat mounts
+    const triggerText = buildWelcomeMessage(context)
+    console.log('[HomeChatSection] will trigger:', triggerText)
+    setTimeout(() => {
+      setAutoMessage(triggerText)
+    }, 700)
   }
 
   const handleSkip = () => {
-    setWelcomeMessage('Ciao! Sono CasaAI, il tuo assistente immobiliare. Dimmi cosa cerchi e troverò gli annunci migliori per te.')
-    setPhase('chat')
+    setWelcomeText('Ciao! Sono CasaAI, il tuo assistente immobiliare. Dimmi cosa cerchi e troverò gli annunci migliori per te.')
+    setShowWizard(false)
   }
 
   return (
     <div className="w-full">
-      {phase === 'wizard' && (
+      {showWizard ? (
         <ChatOnboarding onComplete={handleWizardComplete} onSkip={handleSkip} />
-      )}
-
-      {phase === 'chat' && (
+      ) : (
         <div className="bg-white rounded-2xl border border-gray-200 shadow-xl overflow-hidden">
           {/* Chat header */}
           <div className="flex items-center gap-3 p-4 border-b border-gray-100 bg-gradient-to-r from-blue-600 to-blue-700">
@@ -87,7 +114,12 @@ export default function HomeChatSection() {
             </div>
           </div>
 
-          <ChatWidget contextId={contextId} initialMessage={welcomeMessage} />
+          <ChatWidget
+            contextId={contextId}
+            initialMessage={welcomeText}
+            triggerMessage={autoMessage}
+            onTriggerConsumed={() => setAutoMessage('')}
+          />
         </div>
       )}
     </div>

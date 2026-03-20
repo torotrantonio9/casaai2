@@ -8,9 +8,16 @@ import ChatMessages from './ChatMessages'
 interface ChatWidgetProps {
   contextId: string | null
   initialMessage?: string
+  triggerMessage?: string
+  onTriggerConsumed?: () => void
 }
 
-export default function ChatWidget({ contextId, initialMessage }: ChatWidgetProps) {
+export default function ChatWidget({
+  contextId,
+  initialMessage,
+  triggerMessage,
+  onTriggerConsumed,
+}: ChatWidgetProps) {
   const [messages, setMessages] = useState<ChatMessage[]>(
     initialMessage
       ? [
@@ -29,13 +36,18 @@ export default function ChatWidget({ contextId, initialMessage }: ChatWidgetProp
   const [input, setInput] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
   const abortRef = useRef<AbortController | null>(null)
+  // Track if a send is in progress to prevent double-sends
+  const sendingRef = useRef(false)
 
-  const sendMessage = useCallback(
+  const sendToAPI = useCallback(
     async (text: string, isAutoTrigger = false) => {
+      if (sendingRef.current) return
       if (!text.trim() && !isAutoTrigger) return
-      if (isStreaming) return
 
-      // Add user message
+      sendingRef.current = true
+      console.log('[ChatWidget] sendToAPI called:', text.slice(0, 60), 'auto:', isAutoTrigger)
+
+      // Add user message to UI
       const userMsg: ChatMessage = {
         id: `user-${Date.now()}`,
         role: 'user',
@@ -44,9 +56,21 @@ export default function ChatWidget({ contextId, initialMessage }: ChatWidgetProp
         timestamp: new Date(),
       }
 
+      const currentMessages: Array<{ role: 'user' | 'assistant'; content: string }> = isAutoTrigger
+        ? [{ role: 'user', content: text }]
+        : []
+
       if (!isAutoTrigger) {
-        setMessages((prev) => [...prev, userMsg])
+        setMessages((prev) => {
+          const textMsgs = prev.filter((m) => m.type === 'text').map((m) => ({
+            role: m.role as 'user' | 'assistant',
+            content: m.content,
+          }))
+          currentMessages.push(...textMsgs, { role: 'user', content: text })
+          return [...prev, userMsg]
+        })
       }
+
       setInput('')
       setIsStreaming(true)
 
@@ -54,28 +78,21 @@ export default function ChatWidget({ contextId, initialMessage }: ChatWidgetProp
       abortRef.current = abortController
 
       try {
-        // Build text-only messages for API
-        const allMessages = isAutoTrigger
-          ? [{ role: 'user' as const, content: text }]
-          : [
-              ...messages.filter((m) => m.type === 'text').map((m) => ({
-                role: m.role,
-                content: m.content,
-              })),
-              { role: 'user' as const, content: text },
-            ]
-
         const response = await fetch('/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            messages: allMessages,
+            messages: currentMessages.length > 0
+              ? currentMessages
+              : [{ role: 'user', content: text }],
             context_id: contextId,
             is_auto_trigger: isAutoTrigger,
             shown_listing_ids: shownListingIds,
           }),
           signal: abortController.signal,
         })
+
+        console.log('[ChatWidget] API response status:', response.status)
 
         if (!response.ok || !response.body) {
           throw new Error(`HTTP ${response.status}`)
@@ -105,6 +122,7 @@ export default function ChatWidget({ contextId, initialMessage }: ChatWidgetProp
 
               switch (event.type) {
                 case 'listings': {
+                  console.log('[ChatWidget] received listings:', event.data.length)
                   const newIds = event.data.map((l) => l.id)
                   setShownListingIds((prev) => [...prev, ...newIds])
                   setMessages((prev) => [
@@ -161,6 +179,7 @@ export default function ChatWidget({ contextId, initialMessage }: ChatWidgetProp
                 }
 
                 case 'error': {
+                  console.error('[ChatWidget] SSE error event:', event.message)
                   setMessages((prev) => [
                     ...prev,
                     {
@@ -175,16 +194,18 @@ export default function ChatWidget({ contextId, initialMessage }: ChatWidgetProp
                 }
 
                 case 'done':
+                  console.log('[ChatWidget] SSE done')
                   break
               }
             } catch {
-              console.warn('SSE parse error:', raw)
+              console.warn('[ChatWidget] SSE parse error:', raw.slice(0, 100))
             }
           }
         }
       } catch (error: unknown) {
         if (error instanceof DOMException && error.name === 'AbortError') return
         const msg = error instanceof Error ? error.message : 'Errore di connessione'
+        console.error('[ChatWidget] fetch error:', msg)
         setMessages((prev) => [
           ...prev,
           {
@@ -197,35 +218,37 @@ export default function ChatWidget({ contextId, initialMessage }: ChatWidgetProp
         ])
       } finally {
         setIsStreaming(false)
+        sendingRef.current = false
       }
     },
-    [messages, contextId, shownListingIds, isStreaming]
+    [contextId, shownListingIds]
   )
+
+  // Handle triggerMessage prop — fires when parent sets a new trigger
+  const lastTriggerRef = useRef('')
+  useEffect(() => {
+    if (triggerMessage && triggerMessage.trim() && triggerMessage !== lastTriggerRef.current) {
+      lastTriggerRef.current = triggerMessage
+      console.log('[ChatWidget] triggerMessage received:', triggerMessage.slice(0, 60))
+      sendToAPI(triggerMessage, true)
+      onTriggerConsumed?.()
+    }
+  }, [triggerMessage, sendToAPI, onTriggerConsumed])
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    sendMessage(input)
+    if (input.trim()) {
+      sendToAPI(input)
+    }
   }
 
   const handleQuickReply = (text: string) => {
-    sendMessage(text)
+    sendToAPI(text)
   }
 
   const handleRefine = () => {
     inputRef.current?.focus()
   }
-
-  // Auto-trigger on mount if context exists
-  const autoTriggered = useRef(false)
-  useEffect(() => {
-    if (contextId && !autoTriggered.current) {
-      autoTriggered.current = true
-      const timer = setTimeout(() => {
-        sendMessage('Mostrami gli annunci migliori per me', true)
-      }, 500)
-      return () => clearTimeout(timer)
-    }
-  }, [contextId, sendMessage])
 
   return (
     <div className="flex flex-col h-full">
