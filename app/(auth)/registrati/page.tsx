@@ -2,17 +2,14 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
 import Navbar from '@/components/layout/Navbar'
-import { createClient } from '@/lib/supabase/client'
+import { supabase } from '@/lib/supabase/client'
 
 export default function RegistratiPage() {
   const [form, setForm] = useState({ full_name: '', email: '', password: '', role: 'buyer' })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState(false)
-  const router = useRouter()
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
@@ -20,7 +17,6 @@ export default function RegistratiPage() {
     setSuccess(false)
 
     try {
-      const supabase = createClient()
       const { error: signUpError } = await supabase.auth.signUp({
         email: form.email,
         password: form.password,

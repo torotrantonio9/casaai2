@@ -2,16 +2,14 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
 import Navbar from '@/components/layout/Navbar'
-import { createClient } from '@/lib/supabase/client'
+import { supabase } from '@/lib/supabase/client'
 
 export default function LoginPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const router = useRouter()
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -19,7 +17,6 @@ export default function LoginPage() {
     setError('')
 
     try {
-      const supabase = createClient()
       const { error: signInError } = await supabase.auth.signInWithPassword({
         email,
         password,
@@ -28,7 +25,7 @@ export default function LoginPage() {
       if (signInError) {
         setError(signInError.message)
       } else {
-        router.push('/dashboard')
+        window.location.replace('/dashboard')
       }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Errore durante il login')
