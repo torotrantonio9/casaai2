@@ -1,6 +1,13 @@
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase/admin'
 
+/**
+ * Seed agency — columns match agencies table in 001_schema.sql:
+ * id, name, slug, description, logo_url, address, city, province,
+ * phone, email, website, vat_number, subscription_plan,
+ * stripe_customer_id, stripe_subscription_id, max_listings,
+ * max_agents, is_active, created_at, updated_at
+ */
 const SEED_AGENCY = {
   name: 'Immobiliare Vesuvio',
   slug: 'immobiliare-vesuvio',
@@ -18,6 +25,20 @@ const SEED_AGENCY = {
   is_active: true,
 }
 
+/**
+ * Seed listing shape — columns match listings table in 001_schema.sql:
+ * id, agency_id, agent_id, title, description, ai_description,
+ * listing_type, property_type, status, price, price_period,
+ * price_per_sqm, condominium_fees, address, city, province, cap,
+ * zone, lat, lng, surface_sqm, rooms, bedrooms, bathrooms, floor,
+ * total_floors, year_built, energy_class, has_elevator, has_parking,
+ * has_garden, has_terrace, has_balcony, has_cellar,
+ * has_air_conditioning, has_heating, is_furnished, pet_friendly,
+ * is_accessible, photos, virtual_tour_url, video_url, slug,
+ * is_featured, views_count, contacts_count, embedding,
+ * external_id, external_source, external_url, published_at,
+ * expires_at, created_at, updated_at
+ */
 interface SeedListing {
   title: string
   listing_type: 'sale' | 'rent'
@@ -129,9 +150,11 @@ const SEED_LISTINGS: SeedListing[] = [
   { title: 'Box auto Vomero', listing_type: 'sale', property_type: 'commercial', status: 'active', price: 35000, address: 'Via Luca Giordano 45', city: 'Napoli', province: 'NA', zone: 'Vomero', cap: '80129', lat: 40.8510, lng: 14.2310, surface_sqm: 18, rooms: 1, bedrooms: 0, bathrooms: 0, floor: -1, total_floors: 0, year_built: 1980, energy_class: 'pending', has_elevator: false, has_parking: true, has_garden: false, has_terrace: false, has_balcony: false, has_cellar: false, has_air_conditioning: false, has_heating: false, is_furnished: false, pet_friendly: false, is_accessible: true, is_featured: false },
 ]
 
+// ---------- route ----------
+
 export async function GET() {
   try {
-    // 1. Create agency
+    // 1. Create agency (upsert on slug)
     const { data: agency, error: agencyError } = await supabaseAdmin
       .from('agencies')
       .upsert(SEED_AGENCY, { onConflict: 'slug' })
@@ -139,22 +162,30 @@ export async function GET() {
       .single()
 
     if (agencyError || !agency) {
-      return NextResponse.json({ error: agencyError?.message || 'Errore creazione agenzia' }, { status: 500 })
+      return NextResponse.json(
+        { error: agencyError?.message || 'Errore creazione agenzia' },
+        { status: 500 },
+      )
     }
 
-    // 2. Delete existing listings for this agency
-    await supabaseAdmin
-      .from('listings')
-      .delete()
-      .eq('agency_id', agency.id)
+    const agencyRecord = agency as Record<string, unknown>
+    const agencyId = agencyRecord.id as string
 
-    // 3. Insert listings
+    // 2. Delete existing listings for this agency
+    await supabaseAdmin.from('listings').delete().eq('agency_id', agencyId)
+
+    // 3. Insert listings with computed fields
     const listingsToInsert = SEED_LISTINGS.map((listing, index) => ({
       ...listing,
-      agency_id: agency.id,
+      agency_id: agencyId,
       slug: `${listing.title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${index}`,
-      price_per_sqm: listing.surface_sqm > 0 ? Math.round(listing.price / listing.surface_sqm) : null,
-      published_at: new Date(Date.now() - Math.random() * 30 * 24 * 60 * 60 * 1000).toISOString(),
+      price_per_sqm:
+        listing.surface_sqm > 0
+          ? Math.round(listing.price / listing.surface_sqm)
+          : null,
+      published_at: new Date(
+        Date.now() - Math.random() * 30 * 24 * 60 * 60 * 1000,
+      ).toISOString(),
     }))
 
     const { data: insertedListings, error: insertError } = await supabaseAdmin
@@ -163,13 +194,16 @@ export async function GET() {
       .select('id')
 
     if (insertError) {
-      return NextResponse.json({ error: insertError.message }, { status: 500 })
+      return NextResponse.json(
+        { error: insertError.message },
+        { status: 500 },
+      )
     }
 
     return NextResponse.json({
       success: true,
       inserted: insertedListings?.length || 0,
-      agency_id: agency.id,
+      agency_id: agencyId,
     })
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : 'Errore seed'
