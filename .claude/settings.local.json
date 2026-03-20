@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mv C:/Users/torto/Desktop/casaai2/env.local /tmp/casaai2_env.local)",
+      "Bash(npx create-next-app@latest . --typescript --tailwind --app --no-src-dir --import-alias \"@/*\" --eslint --yes)"
+    ]
+  }
+}
