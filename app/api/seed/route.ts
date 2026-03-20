@@ -154,27 +154,37 @@ const SEED_LISTINGS: SeedListing[] = [
 
 export async function GET() {
   try {
-    // 1. Create agency (upsert on slug)
-    const { data: agency, error: agencyError } = await supabaseAdmin
+    // 1. Check if agency already exists by name
+    const { data: existingAgency } = await supabaseAdmin
       .from('agencies')
-      .upsert(SEED_AGENCY, { onConflict: 'slug' })
-      .select()
+      .select('id')
+      .eq('name', SEED_AGENCY.name)
       .single()
 
-    if (agencyError || !agency) {
-      return NextResponse.json(
-        { error: agencyError?.message || 'Errore creazione agenzia' },
-        { status: 500 },
-      )
-    }
+    let agencyId: string
 
-    const agencyRecord = agency as Record<string, unknown>
-    const agencyId = agencyRecord.id as string
+    if (existingAgency) {
+      agencyId = (existingAgency as Record<string, unknown>).id as string
+    } else {
+      const { data: newAgency, error: agencyError } = await supabaseAdmin
+        .from('agencies')
+        .insert(SEED_AGENCY)
+        .select('id')
+        .single()
+
+      if (agencyError || !newAgency) {
+        return NextResponse.json(
+          { error: agencyError?.message || 'Errore creazione agenzia' },
+          { status: 500 },
+        )
+      }
+      agencyId = (newAgency as Record<string, unknown>).id as string
+    }
 
     // 2. Delete existing listings for this agency
     await supabaseAdmin.from('listings').delete().eq('agency_id', agencyId)
 
-    // 3. Insert listings with computed fields
+    // 3. Insert listings — build with computed fields
     const listingsToInsert = SEED_LISTINGS.map((listing, index) => ({
       ...listing,
       agency_id: agencyId,
@@ -188,9 +198,32 @@ export async function GET() {
       ).toISOString(),
     }))
 
+    // 4. Check which listings already exist by title (safety net)
+    const { data: existingListings } = await supabaseAdmin
+      .from('listings')
+      .select('title')
+      .eq('agency_id', agencyId)
+
+    const existingTitles = new Set(
+      (existingListings as Array<{ title: string }> | null)?.map((l) => l.title) ?? [],
+    )
+
+    const newListings = listingsToInsert.filter(
+      (l) => !existingTitles.has(l.title),
+    )
+
+    if (newListings.length === 0) {
+      return NextResponse.json({
+        success: true,
+        inserted: 0,
+        agency_id: agencyId,
+        message: 'Tutti gli annunci esistono già',
+      })
+    }
+
     const { data: insertedListings, error: insertError } = await supabaseAdmin
       .from('listings')
-      .insert(listingsToInsert)
+      .insert(newListings)
       .select('id')
 
     if (insertError) {
