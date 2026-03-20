@@ -2,21 +2,46 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import Navbar from '@/components/layout/Navbar'
+import { createClient } from '@/lib/supabase/client'
 
 export default function RegistratiPage() {
   const [form, setForm] = useState({ full_name: '', email: '', password: '', role: 'buyer' })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [success, setSuccess] = useState(false)
+  const router = useRouter()
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
     setError('')
-    setTimeout(() => {
+    setSuccess(false)
+
+    try {
+      const supabase = createClient()
+      const { error: signUpError } = await supabase.auth.signUp({
+        email: form.email,
+        password: form.password,
+        options: {
+          data: {
+            full_name: form.full_name,
+            role: form.role,
+          },
+        },
+      })
+
+      if (signUpError) {
+        setError(signUpError.message)
+      } else {
+        setSuccess(true)
+      }
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Errore durante la registrazione')
+    } finally {
       setLoading(false)
-      setError('Registrazione Supabase non ancora configurata. Configura le credenziali nel progetto Supabase.')
-    }, 1000)
+    }
   }
 
   return (
@@ -32,7 +57,14 @@ export default function RegistratiPage() {
 
             {error && <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-red-700 text-sm mb-4">{error}</div>}
 
-            <form onSubmit={handleSubmit} className="space-y-4">
+            {success && (
+              <div className="bg-green-50 border border-green-200 rounded-lg p-4 text-green-700 text-sm mb-4">
+                <p className="font-medium">Registrazione completata!</p>
+                <p className="mt-1">Controlla la tua email per confermare l&apos;account. Poi potrai <Link href="/login" className="underline font-medium">accedere</Link>.</p>
+              </div>
+            )}
+
+            {!success && <form onSubmit={handleSubmit} className="space-y-4">
               <div>
                 <label htmlFor="reg_name" className="block text-sm font-medium mb-1" style={{ color: '#111827' }}>Nome e Cognome</label>
                 <input id="reg_name" type="text" required value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })}
@@ -63,7 +95,7 @@ export default function RegistratiPage() {
                 className="w-full py-3 bg-blue-600 text-white rounded-xl font-medium hover:bg-blue-700 transition-colors disabled:opacity-50">
                 {loading ? 'Registrazione...' : 'Registrati'}
               </button>
-            </form>
+            </form>}
 
             <p className="text-center text-sm text-gray-500 mt-6">
               Hai già un account? <Link href="/login" className="text-blue-600 hover:underline">Accedi</Link>
