@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import { Send } from 'lucide-react'
 import type { ChatMessage, SSEEvent } from '@/types/chat'
 import ChatMessages from './ChatMessages'
@@ -217,12 +217,15 @@ export default function ChatWidget({ contextId, initialMessage }: ChatWidgetProp
 
   // Auto-trigger on mount if context exists
   const autoTriggered = useRef(false)
-  if (contextId && !autoTriggered.current && messages.length <= 1) {
-    autoTriggered.current = true
-    setTimeout(() => {
-      sendMessage('Mostrami gli annunci migliori per me', true)
-    }, 500)
-  }
+  useEffect(() => {
+    if (contextId && !autoTriggered.current) {
+      autoTriggered.current = true
+      const timer = setTimeout(() => {
+        sendMessage('Mostrami gli annunci migliori per me', true)
+      }, 500)
+      return () => clearTimeout(timer)
+    }
+  }, [contextId, sendMessage])
 
   return (
     <div className="flex flex-col h-full">

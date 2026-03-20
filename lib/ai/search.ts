@@ -68,6 +68,9 @@ export async function searchListings(
     .order('created_at', { ascending: false })
     .limit(6)
 
+  console.log('[search] merged filters:', JSON.stringify(mergedFilters))
+  console.log('[search] excluded IDs:', shownIds.length)
+
   const { data: listings, error } = await query
 
   if (error) {
@@ -75,7 +78,10 @@ export async function searchListings(
     return []
   }
 
+  console.log('[search] query returned:', listings?.length || 0, 'results')
+
   if (!listings || listings.length === 0) {
+    console.log('[search] trying fallback query (no filters)...')
     // Fallback: try without strict filters
     const { data: fallbackListings } = await supabaseAdmin
       .from('listings')
@@ -85,6 +91,7 @@ export async function searchListings(
       .order('created_at', { ascending: false })
       .limit(6)
 
+    console.log('[search] fallback returned:', fallbackListings?.length || 0)
     if (!fallbackListings || fallbackListings.length === 0) return []
 
     return fallbackListings.map((l: Listing) => toListingCard(l, mergedFilters))
